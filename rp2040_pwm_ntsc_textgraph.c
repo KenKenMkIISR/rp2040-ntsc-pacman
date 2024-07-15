@@ -23,7 +23,6 @@ caused by using this program.
 
 #include <stdio.h>
 #include <stdint.h>
-#include <math.h>
 
 #include "pico/stdlib.h"
 #include "hardware/dma.h"
@@ -68,10 +67,10 @@ static void makeDmaBuffer(uint16_t* buf, size_t line_num)
 		for (int j = 0; j < 8; j++) *b++ = 2;
 		for (int j = 0; j < 9; j++)
 		{
+			*b++=2;
 			*b++=1;
 			*b++=2;
 			*b++=3;
-			*b++=2;
 		}
 		while (b < buf + NUM_LINE_SAMPLES) *b++ = 2;
 	}
@@ -133,31 +132,34 @@ void set_palette(unsigned char c,unsigned char b,unsigned char r,unsigned char g
 	// カラーパレット設定
 	// c:パレット番号0-255、r,g,b:0-255
 
-	uint16_t white_level=1100*2;
-	uint16_t black_level=286*2;
-	uint8_t chroma_level=128;
-	float chroma_scale = chroma_level / 7168.0f;
-	float satuation_base = black_level / 2;
-	uint32_t diff_level = white_level - black_level;
+	// 輝度Y=0.587*G+0.114*B+0.299*R
+	// 信号N=Y+0.4921*(B-Y)*sinθ+0.8773*(R-Y)*cosθ
+	// 出力データS=N*(white-black)/255+black  white=9,black=2
 
-	static const float BASE_RAD = (M_PI * 145) / 180;
+	int32_t y,s;
+	y=(150*g+29*b+77*r+128)/256;
 
-	float r1=(float)r;
-	float g1=(float)g;
-	float b1=(float)b;
-	float y = r1 * 0.299f + g1 * 0.587f + b1 * 0.114f;
-	float i = (b1 - y) * -0.2680f + (r1 - y) * 0.7358f;
-	float q = (b1 - y) *  0.4127f + (r1 - y) * 0.4778f;
-	y = y * diff_level / 256 + black_level;
+	// 微妙な色ズレを修正
+/*
+	float th=30.0/180*3.14159;
+	int32_t b_y_1=(int32_t)((b-y)*256*7*0.4921*sinf(0+th));
+	int32_t r_y_1=(int32_t)((r-y)*256*7*0.8773*cosf(0+th));
+	int32_t b_y_2=(int32_t)((b-y)*256*7*0.4921*sinf(3.14159/2+th));
+	int32_t r_y_2=(int32_t)((r-y)*256*7*0.8773*cosf(3.14159/2+th));
+*/
+	int32_t b_y_1=(b-y)*441;
+	int32_t r_y_1=(r-y)*1361;
+	int32_t b_y_2=(b-y)*764;
+	int32_t r_y_2=(r-y)*(-786);
 
-	float phase_offset = atan2f(i, q) + BASE_RAD;
-	float saturation = sqrtf(i * i + q * q) * chroma_scale;
-	saturation = saturation * satuation_base;
-	for (int j = 0; j < 4; j++)
-	{
-		int tmp = ((int)(128.5f + y + sinf(phase_offset + (float)M_PI / 2 * j) * saturation)) >> 8;
-		color_tbl[c*4+j] = tmp < 0 ? 0 : (tmp > 255 ? 255 : tmp);
-	}
+	s=(y*1792 + b_y_1 + r_y_1 + 2*65536+32768)/65536;
+	color_tbl[c*4] = s<0 ? 0 : s;
+	s=(y*1792 + b_y_2 + r_y_2 + 2*65536+32768)/65536;
+	color_tbl[c*4+1] = s<0 ? 0 : s;
+	s=(y*1792 - b_y_1 - r_y_1 + 2*65536+32768)/65536;
+	color_tbl[c*4+2] = s<0 ? 0 : s;
+	s=(y*1792 - b_y_2 - r_y_2 + 2*65536+32768)/65536;
+	color_tbl[c*4+3] = s<0 ? 0 : s;
 }
 
 static void init_palette(void){
