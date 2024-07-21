@@ -10,8 +10,7 @@
 #define GVRAM framebuffer
 
 // NTSC出力 1ラインあたりのサンプル数
-//#define NUM_LINE_SAMPLES 908  // 227 * 4
-#define NUM_LINE_SAMPLES 907  // 227 * 4 -1
+#define NUM_LINE_SAMPLES 908  // 227 * 4
 
 // NTSC出力 走査線数
 #define NUM_LINES 262  // 走査線262本
