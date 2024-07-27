@@ -19,7 +19,7 @@ caused by using this program.
 // This signal generation program (using PWM and DMA) is the idea of @lovyan03.
 // https://github.com/lovyan03/
 
-#pragma GCC optimize ("O3")
+//#pragma GCC optimize ("O3")
 
 #include <stdio.h>
 #include <stdint.h>
@@ -179,21 +179,21 @@ static void init_palette(void){
 static void irq_handler(void) {
 	static bool flip = true;
 	static size_t scanline = 0;
+	volatile uint32_t s0;
 
 #if defined ( PIN_DEBUG_BUSY )
 	gpio_put(PIN_DEBUG_BUSY, 1);
 #endif
-	if(flip){
-		dma_hw->ints0 |= 1u << pwm_dma_chan0;
-		dma_channel_set_read_addr(pwm_dma_chan0, dma_buffer[0], true);
+	s0=dma_hw->ints0;
+	dma_hw->ints0 = s0;
+	if(s0 & (1u << pwm_dma_chan1)){
+		makeDmaBuffer(dma_buffer[1], scanline);
+		dma_channel_set_read_addr(pwm_dma_chan1, dma_buffer[1], false);
 	}
-	else
-	{
-		dma_hw->ints0 |= 1u << pwm_dma_chan1;
-		dma_channel_set_read_addr(pwm_dma_chan1, dma_buffer[1], true);
+	else{
+		makeDmaBuffer(dma_buffer[0], scanline);
+		dma_channel_set_read_addr(pwm_dma_chan0, dma_buffer[0], false);
 	}
-	flip = !flip;
-	makeDmaBuffer(dma_buffer[flip], scanline);
 	if (++scanline >= NUM_LINES) {
 		scanline = 0;
 	}
@@ -249,45 +249,45 @@ void rp2040_pwm_ntsc_init(void)
 	pwm_init(pwm_slice_num, &config, true);
 	pwm_set_wrap(pwm_slice_num, pwm_div - 1);
 
-	pwm_dma_chan0 = dma_claim_unused_channel(true);
-	dma_channel_config pwm_dma_chan_config0 = dma_channel_get_default_config(pwm_dma_chan0);
-	channel_config_set_transfer_data_size(&pwm_dma_chan_config0, DMA_SIZE_16);
-	channel_config_set_read_increment(&pwm_dma_chan_config0, true);
-	channel_config_set_write_increment(&pwm_dma_chan_config0, false);
-	channel_config_set_dreq(&pwm_dma_chan_config0, DREQ_PWM_WRAP0 + pwm_slice_num);
-
-	pwm_dma_chan1 = dma_claim_unused_channel(true);
-	dma_channel_config pwm_dma_chan_config1 = dma_channel_get_default_config(pwm_dma_chan1);
-	channel_config_set_transfer_data_size(&pwm_dma_chan_config1, DMA_SIZE_16);
-	channel_config_set_read_increment(&pwm_dma_chan_config1, true);
-	channel_config_set_write_increment(&pwm_dma_chan_config1, false);
-	channel_config_set_dreq(&pwm_dma_chan_config1, DREQ_PWM_WRAP0 + pwm_slice_num);
-
-	channel_config_set_chain_to(&pwm_dma_chan_config0, pwm_dma_chan1);
-	channel_config_set_chain_to(&pwm_dma_chan_config1, pwm_dma_chan0);
-
 	volatile void* wr_addr = &pwm_hw->slice[pwm_slice_num].cc;
 	wr_addr = (volatile void*)(((uintptr_t)wr_addr) + 2);
 
-	makeDmaBuffer(dma_buffer[0], 0);
-	makeDmaBuffer(dma_buffer[1], 1);
+	pwm_dma_chan0 = dma_claim_unused_channel(true);
+	pwm_dma_chan1 = dma_claim_unused_channel(true);
 
+	dma_channel_config c = dma_channel_get_default_config(pwm_dma_chan0);
+	channel_config_set_transfer_data_size(&c, DMA_SIZE_16);
+	channel_config_set_read_increment(&c, true);
+	channel_config_set_write_increment(&c, false);
+	channel_config_set_dreq(&c, DREQ_PWM_WRAP0 + pwm_slice_num);
+	channel_config_set_chain_to(&c, pwm_dma_chan1);
 	dma_channel_configure(
 		pwm_dma_chan0,
-		&pwm_dma_chan_config0,
+		&c,
 		wr_addr,
 		dma_buffer[0],
 		NUM_LINE_SAMPLES,
 		false
 	);
+
+	c = dma_channel_get_default_config(pwm_dma_chan1);
+	channel_config_set_transfer_data_size(&c, DMA_SIZE_16);
+	channel_config_set_read_increment(&c, true);
+	channel_config_set_write_increment(&c, false);
+	channel_config_set_dreq(&c, DREQ_PWM_WRAP0 + pwm_slice_num);
+	channel_config_set_chain_to(&c, pwm_dma_chan0);
 	dma_channel_configure(
 		pwm_dma_chan1,
-		&pwm_dma_chan_config1,
+		&c,
 		wr_addr,
 		dma_buffer[1],
 		NUM_LINE_SAMPLES,
 		false
 	);
+
+	makeDmaBuffer(dma_buffer[0], 0);
+	makeDmaBuffer(dma_buffer[1], 1);
+
 	dma_set_irq0_channel_mask_enabled((1u<<pwm_dma_chan0)|(1u<<pwm_dma_chan1),true);
 //	dma_channel_set_irq0_enabled(pwm_dma_chan0, true);
 	irq_set_exclusive_handler(DMA_IRQ_0, irq_handler);
